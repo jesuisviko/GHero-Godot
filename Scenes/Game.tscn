@@ -1,0 +1,73 @@
+[gd_scene load_steps=9 format=3 uid="uid://dhy30dgrk3obo"]
+
+[ext_resource type="Script" uid="uid://b5xt6ywyehhge" path="res://Scripts/GameManager.gd" id="1_iukft"]
+[ext_resource type="AudioStream" uid="uid://cwx6134t0k3yc" path="res://Songs/HIT.ogg" id="2_j5yw3"]
+[ext_resource type="AudioStream" uid="uid://b5fmep2w2tq1o" path="res://Songs/MISS.ogg" id="3_kldst"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_iukft"]
+resource_name = "Fretboard"
+size = Vector3(5, 0.1, 50)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_iukft"]
+albedo_color = Color(0, 0.03137255, 0, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_gl6un"]
+material = SubResource("StandardMaterial3D_iukft")
+size = Vector3(5.2, 0.1, 0.1)
+
+[sub_resource type="LabelSettings" id="LabelSettings_iukft"]
+font_size = 48
+
+[sub_resource type="LabelSettings" id="LabelSettings_gl6un"]
+font_size = 32
+
+[node name="GameManager" type="Node"]
+script = ExtResource("1_iukft")
+
+[node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.81915206, 0.57357645, 0, -0.57357645, 0.81915206, 0, 3, 2.665825)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.70710677, -0.3567549, 0.61051285, 0, 0.8633956, 0.5045276, -0.70710677, -0.3567549, 0.61051285, 8.881612, 5.1359816, 7.11556)
+shadow_enabled = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.9998976, 0.014311211, 0, -0.014311211, 0.9998976, 0, 0, 0, 1, -0.018013954, -0.0076991916, -0.020614862)
+mesh = SubResource("BoxMesh_iukft")
+
+[node name="StrikeLine" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1361872, 0)
+mesh = SubResource("BoxMesh_gl6un")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="Control" type="Control" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ScoreLabel" type="Label" parent="CanvasLayer/Control"]
+layout_mode = 0
+offset_right = 107.0
+offset_bottom = 36.0
+text = "Score : 0"
+label_settings = SubResource("LabelSettings_iukft")
+
+[node name="ComboLabel" type="Label" parent="CanvasLayer/Control"]
+layout_mode = 0
+offset_top = 60.0
+offset_right = 163.0
+offset_bottom = 175.0
+text = "Combo : 0"
+label_settings = SubResource("LabelSettings_gl6un")
+
+[node name="SFXHit" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("2_j5yw3")
+
+[node name="SFXMiss" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("3_kldst")
