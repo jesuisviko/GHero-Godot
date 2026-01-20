@@ -17,9 +17,15 @@ var hit_z_position = 0.0 # La ligne où on doit jouer est à Z = 0
 # Liste pour garder une trace des notes affichées à l'écran
 var active_notes = []
 
+# --- AJOUT POOLING ---> OPTIMISATION : on évite les draw calls répétitifs
+var note_pool = [] # Le "Garage" à notes
+var pool_size = 100 # Combien de notes on prépare au total
+
 # Références à l'interface
 @onready var score_label = $CanvasLayer/Control/ScoreLabel
 @onready var combo_label = $CanvasLayer/Control/ComboLabel
+
+
 
 # Variable de jeu supplémentaire
 var combo = 0
@@ -47,12 +53,41 @@ var score = 0
 @onready var sfx_hit = $SFXHit
 @onready var sfx_miss = $SFXMiss
 
+# Liste qui va contenir les données audio pré-chargées
+var miss_sounds_library = []
+
 
 # Permet d'ignorer les inputs secondaires d'un accord réussi
 var last_successful_hit_time = -10.0
 
 func _ready():
-	# --- Chargement (Identique à avant) ---
+	# --- 1. PRÉPARATION DU POOL (OPTIMISÉE) ---
+	print("Construction du pool de notes...")
+	for i in range(pool_size):
+		var n = note_scene.instantiate()
+		
+		# --- OPTIMISATION : On cherche le Mesh MAINTENANT ---
+		var mesh_ref = null
+		for child in n.get_children():
+			if child is MeshInstance3D:
+				mesh_ref = child
+				break
+		
+		# On "colle" la référence sur la note pour plus tard
+		if mesh_ref:
+			n.set_meta("visual_mesh", mesh_ref)
+		else:
+			print("ERREUR CRITIQUE : Pas de Mesh trouvé dans la note à la création !")
+		# ---------------------------------------------------
+
+		n.visible = false
+		n.process_mode = Node.PROCESS_MODE_DISABLED
+		n.position.y = -50 
+		add_child(n)
+		note_pool.append(n)
+	print("Pool prêt avec ", pool_size, " notes !")
+	# ------------------------------------------
+	
 	# ici, on ne peut jouer qu'un son a chaque lancement du proto
 	# on modifie la partition du son ici
 	var chart_data = SongLoader.load_chart("res://Songs/Face_down.chart.txt") 
@@ -63,14 +98,53 @@ func _ready():
 	if chart_data["bpm_changes"].size() > 0:
 		bpm = chart_data["bpm_changes"][0]["bpm"]
 	
+
+	# 3. Calcul du temps et FILTRAGE STRICT
 	var seconds_per_tick = 60.0 / (bpm * resolution)
-	song_notes = chart_data["notes"]
-	for note in song_notes:
+	var raw_notes = chart_data["notes"]
+	song_notes = []
+	
+	for note in raw_notes:
+		# --- FILTRE BLINDÉ ---
+		# 1. On force la conversion en entier (int) pour éviter les pièges "Texte"
+		var lane_index = int(note["color"])
+		
+		# 2. On bannit la colonne 5 (6e note) ET tout ce qui est au-dessus (événements spéciaux)
+		if lane_index >= 5:
+			# print("Note ignorée sur la voie : ", lane_index) # Décommente si tu veux voir ce qu'il vire
+			continue 
+		# ---------------------
+		
+		# Si on passe le filtre, on prépare la note
 		note["time"] = note["tick"] * seconds_per_tick
+		# On stocke l'index nettoyé pour être sûr
+		note["color"] = lane_index 
+		song_notes.append(note)
+	
+	print("Jeu prêt ! BPM:", bpm, " | Notes valides chargées :", song_notes.size())
 	
 	# --- Lancement Audio ---
 	# c'est ici qu'on donne le chemin d'accès du son
 	var music = load("res://Songs/Face down.ogg")
+	
+	
+	randomize() # Important : Mélange la graine aléatoire à chaque lancement du jeu
+	# ... (Ton code de pool de notes) ...
+
+	# --- CHARGEMENT DES SONS D'ERREUR ---
+	print("Chargement des sons d'erreur...")
+	# On boucle de 1 à 5 pour charger miss_1.wav, miss_2.wav, etc.
+	for i in range(1, 6):
+		var path = "res://Sounds/Miss_" + str(i) + ".ogg" # Attention à l'extension (.wav ou .ogg)
+		# On vérifie si le fichier existe pour éviter que le jeu plante
+		if FileAccess.file_exists(path):
+			var sound = load(path)
+			miss_sounds_library.append(sound)
+		else:
+			print("⚠️ Attention : Son introuvable -> ", path)
+	# ------------------------------------
+	
+	
 	audio_player.stream = music
 	audio_player.play()
 	
@@ -94,75 +168,99 @@ func _process(_delta): # on utilise pas delta pour l'instant, donc on met "_" de
 			
 	# 2. MOUVEMENT & NETTOYAGE DES RATÉS
 	# Attention : on doit parcourir à l'envers pour pouvoir supprimer sans buguer la boucle
+	# --- 2. BOUGER LES NOTES & GÉRER LES "MISS" ---
 	var i = active_notes.size() - 1
 	while i >= 0:
 		var note_node = active_notes[i]
+		
+		# Sécurité : Si par malheur la note a été détruite ailleurs (bug), on l'oublie
+		if not is_instance_valid(note_node):
+			active_notes.remove_at(i)
+			i -= 1
+			continue
+
+		# Calcul du mouvement
 		var note_target_time = note_node.get_meta("target_time")
 		var target_z = (note_target_time - song_position) * note_speed
-		
 		note_node.position.z = -target_z 
 		
-		
-		
-	# Si la note est passée loin derrière la caméra, on reset le comno
+		# SI LA NOTE EST TROP LOIN (MISS)
 		if note_node.position.z > 2.0:
-			print("Miss !") 
-			_on_miss_hit() # On appelle la fonction commune de Miss (Son + Reset Combo)
+			_on_miss_hit() 
 			
-			# --- AJOUT ICI : Casser le combo ---
-			combo = 0
-			multiplier = 1
-			combo_label.text = "Combo: 0"
-			# -----------------------------------
+			# RECYCLAGE
+			# Note : On appelle JUSTE la fonction de retour. 
+			# Elle s'occupe d'enlever la note de la liste 'active_notes'.
+			_return_note_to_pool(note_node)
 			
+			# IMPORTANT : On ne fait PAS active_notes.remove_at(i) ici nous-mêmes !
 			
-			active_notes.remove_at(i)
-			note_node.queue_free()
-		
 		i -= 1
+		
+
+		# fonctions de débug a créer ici plus tard
+		
+		
+		
 
 
 
 
 
 func _spawn_note(data):
-	var new_note = note_scene.instantiate()
+	# On vérifie s'il reste des notes dans le garage
+	if note_pool.is_empty():
+		print("ERREUR CRITIQUE : Plus de notes dans le pool ! (Augmente pool_size)")
+		return
+
+	# On récupère la dernière note du garage (pop_back est très rapide)
+	var new_note = note_pool.pop_back()
 	
-	# Stockage de la donnée temporelle (Méthode Meta blindée)
+	# --- RÉINITIALISATION DE LA NOTE ---
+	# Comme elle a déjà servi, il faut tout remettre à zéro !
+	new_note.visible = true
+	new_note.process_mode = Node.PROCESS_MODE_INHERIT # On la réveille
+	new_note.position.y = 0 
+	new_note.position.z = -50 # On la place au fond par défaut
+	
+	# Stockage des données (Comme avant)
 	new_note.set_meta("target_time", data["time"])
-	new_note.set_meta("lane", data["color"]) # On garde aussi le numéro de la ligne en mémoire
+	new_note.set_meta("lane", data["color"])
 	
-	# Position X : On espace les couloirs
+	# Position X selon le couloir
 	new_note.position.x = (data["color"] - 2) * 1.0 
 	
-	# --- COLORATION MAGIQUE ---
-	# On cherche le MeshInstance3D à l'intérieur de la scène Note
-	var mesh_instance = new_note.get_node("Note")
-	
-	if mesh_instance:
-		# On crée un nouveau matériau unique pour cette note
-		var new_mat = StandardMaterial3D.new()
+	# --- 3. COLORATION ULTRA RAPIDE (Via Cache) ---
+	# On demande directement la référence stockée. Zéro recherche.
+	if new_note.has_meta("visual_mesh"):
+		var mesh_instance = new_note.get_meta("visual_mesh")
 		
-		# On choisit la couleur dans notre liste, selon le numéro de la note
+		var new_mat = StandardMaterial3D.new()
+		new_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		
 		if data["color"] < lane_colors.size():
 			new_mat.albedo_color = lane_colors[data["color"]]
 		else:
-			new_mat.albedo_color = Color.WHITE # Couleur par défaut si bug
+			new_mat.albedo_color = Color.WHITE
 			
-		# On le met en "Unshaded" pour que ça brille même sans lumière
-		new_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		
-		# On applique le matériau
 		mesh_instance.material_override = new_mat
-	# --------------------------
-	
-	add_child(new_note)
+		
+	# On l'ajoute à la liste des notes actives (sur la piste)
 	active_notes.append(new_note)
 
-# ---- SCRIPT DE GESTION DU GAMEPLAY : Score, etc...
-
-
-
+func _return_note_to_pool(note_node):
+	# 1. On l'enlève de la liste active (si elle y est encore)
+	if note_node in active_notes:
+		active_notes.erase(note_node)
+	
+	# 2. On la désactive
+	note_node.visible = false
+	note_node.process_mode = Node.PROCESS_MODE_DISABLED
+	note_node.position.y = -50 
+	
+	# 3. On la range dans le garage (si elle n'y est pas déjà)
+	if not note_node in note_pool:
+		note_pool.append(note_node)
 
 # --- GESTION DES TOUCHES ---
 # --- GESTION DES TOUCHES (INPUT) ---
@@ -249,10 +347,12 @@ func _on_note_hit(note_node):
 	combo_label.text = "Combo: " + str(combo) + " (x" + str(multiplier) + ")"
 	# ----------------------------
 	
+	_return_note_to_pool(note_node)
+	
 	# On la retire de la liste des notes actives pour ne pas la rejouer
-	active_notes.erase(note_node)
+	# active_notes.erase(note_node)
 	# On détruit l'objet visuel
-	note_node.queue_free()
+	# note_node.queue_free()
 	
 	# (Optionnel) Effet visuel : on pourrait faire des étincelles ici
 	
@@ -260,7 +360,16 @@ func _on_note_hit(note_node):
 
 # --- ÉCHEC (Pénalité ou Note ratée) ---
 func _on_miss_hit():
-	sfx_miss.play() # SON MISS
+	# Si on a des sons en stock
+	if miss_sounds_library.size() > 0:
+		# .pick_random() est une fonction magique de Godot 4 qui fait le travail pour toi !
+		sfx_miss.stream = miss_sounds_library.pick_random()
+		
+		# Astuce "Pitch" : Change légèrement la hauteur du son (0.9 à 1.1)
+		# pour donner l'impression qu'il y a encore plus de variations !
+		sfx_miss.pitch_scale = randf_range(0.8, 1.2)
+		
+		sfx_miss.play()
 	
 	combo = 0
 	multiplier = 1
