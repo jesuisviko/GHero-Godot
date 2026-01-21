@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://dhy30dgrk3obo"]
+[gd_scene load_steps=11 format=3 uid="uid://dhy30dgrk3obo"]
 
 [ext_resource type="Script" uid="uid://b5xt6ywyehhge" path="res://Scripts/GameManager.gd" id="1_iukft"]
 [ext_resource type="AudioStream" uid="uid://cwx6134t0k3yc" path="res://Sounds/HIT.ogg" id="2_j5yw3"]
@@ -24,7 +24,11 @@ font_size = 32
 [sub_resource type="LabelSettings" id="LabelSettings_j5yw3"]
 font_size = 30
 
+[sub_resource type="LabelSettings" id="LabelSettings_kldst"]
+font_size = 48
+
 [node name="GameManager" type="Node"]
+process_mode = 1
 script = ExtResource("1_iukft")
 
 [node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]
@@ -79,10 +83,40 @@ text = "PERFECT ! "
 label_settings = SubResource("LabelSettings_j5yw3")
 
 [node name="PauseMenu" type="Control" parent="CanvasLayer"]
+process_mode = 3
+visible = false
 layout_mode = 3
-anchors_preset = 0
-offset_right = 40.0
-offset_bottom = 40.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer/PauseMenu"]
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.09998595, 0.09998601, 0.099985994, 0.26666668)
+
+[node name="ResumeButton" type="Button" parent="CanvasLayer/PauseMenu"]
+layout_mode = 0
+offset_left = 567.0
+offset_top = 308.0
+offset_right = 721.0
+offset_bottom = 390.0
+text = "REPRENDRE"
+
+[node name="CountdownLabel" type="Label" parent="CanvasLayer/PauseMenu"]
+visible = false
+layout_mode = 0
+offset_left = 653.0
+offset_top = 308.0
+offset_right = 693.0
+offset_bottom = 375.0
+text = "3"
+label_settings = SubResource("LabelSettings_kldst")
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="SFXHit" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("2_j5yw3")

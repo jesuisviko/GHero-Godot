@@ -18,7 +18,7 @@ var hit_z_position = 0.0 # La ligne où on doit jouer est à Z = 0
 var active_notes = []
 
 # --- AJOUT POOLING ---> OPTIMISATION : on évite les draw calls répétitifs
-var note_pool = [] # Le "Garage" à notes
+var note_pool = [] # "Garage" à notes
 var pool_size = 100 # Combien de notes on prépare au total
 
 # Références à l'interface
@@ -73,6 +73,13 @@ const THRESHOLD_PERFECT = 0.03  # 50ms (Très strict)
 const THRESHOLD_GOOD = 0.1    # 100ms
 const THRESHOLD_OK = 0.15       # 150ms (Ta hit_window actuelle)
 
+
+@onready var pause_menu = $CanvasLayer/PauseMenu
+@onready var resume_button = $CanvasLayer/PauseMenu/ResumeButton
+@onready var countdown_label = $CanvasLayer/PauseMenu/CountdownLabel
+
+# Variable pour savoir si un décompte est déjà en cours
+var is_counting_down = false
 
 func _ready():
 	# --- 1. PRÉPARATION DU POOL (OPTIMISÉE) ---
@@ -294,97 +301,112 @@ func _input(event):
 				# ... ET qu'on n'a pas réussi un accord il y a une fraction de seconde
 				if abs(song_position - last_successful_hit_time) > 0.1:
 					_on_miss_hit() # Alors c'est un vrai Miss !d
+					
+	# --- GESTION PAUSE ---
+	if event.is_action_pressed("ui_cancel"): # "Echap" par défaut
+		# On ne peut pas mettre en pause PENDANT le décompte de reprise
+		if not is_counting_down:
+			_toggle_pause()
 
 # --- LOGIQUE DU JUGE (AVEC GESTION DES ACCORDS) ---
 # --- LOGIQUE DU JUGE (OPTIMISÉE ACCORDS) ---
 func _check_hit(lane_index) -> bool:
 	for note in active_notes:
-		# On cherche la note correspondant à la touche
+		# On cherche si une note existe sur cette colonne
 		if note.get_meta("lane") == lane_index:
 			var note_time = note.get_meta("target_time")
-			var time_diff = abs(song_position - note_time) # Précision
+			var time_diff = abs(song_position - note_time) 
 			
-			# On vérifie si on est dans la fenêtre globale (OK)
+			# --- VERIFICATION DU TIMING ---
+			# Si on est dans la fenêtre de tir
 			if time_diff < THRESHOLD_OK:
 				
-				# --- CALCUL DU RANG ---
+				# 1. On détermine la précision (Jugement)
 				var rank = "OK"
 				if time_diff < THRESHOLD_PERFECT:
 					rank = "PERFECT"
 				elif time_diff < THRESHOLD_GOOD:
 					rank = "GOOD"
 				
-				# --- 1. IDENTIFIER TOUT L'ACCORD ---
+				# 2. On identifie l'accord complet (toutes les notes au même moment)
 				var chord_notes = [note]
 				for other in active_notes:
-					# On cherche les copines de la note (même temps à 10ms près)
 					if other != note and abs(other.get_meta("target_time") - note_time) < 0.01:
 						chord_notes.append(other)
 				
-				# --- 2. VÉRIFIER LES INPUTS ---
+				# 3. On vérifie si TOUTES les touches de l'accord sont pressées
 				var all_pressed = true
-				var missing_lanes = [] # Liste pour le debug
+				var missing_lanes = [] 
 				
 				for n in chord_notes:
 					var l = n.get_meta("lane")
-					# Si UNE SEULE touche de l'accord manque
 					if not Input.is_action_pressed("input_" + str(l)):
 						all_pressed = false
-						missing_lanes.append(l) # On note qui est absent
+						missing_lanes.append(l) 
 				
-				# --- 3. VALIDATION ---
+				# 4. DECISION
 				if all_pressed:
-					# --- DEBUG SUCCÈS ---
-					print("✅ VALIDÉ (", rank, ") ! Accord déclenché par la lane ", lane_index)
+					# --- CAS : SUCCÈS ---
+					# On valide tout l'accord d'un coup
+					print("✅ VALIDÉ (", rank, ") ! Diff: ", snapped(time_diff, 0.001))
 					
-					# On applique le rang à TOUTES les notes
-					for n in chord_notes:
-						_on_note_hit(n, rank)
+					for i in range(chord_notes.size()):
+						var n = chord_notes[i]
+						# Seule la première note de la liste augmente le combo (+1)
+						# Les autres donnent juste des points
+						var is_first_note = (i == 0)
+						_on_note_hit(n, rank, is_first_note)
 					
 					last_successful_hit_time = song_position 
-					return true
-				else:
-					# --- DEBUG TAMPON ---
-					print("⏳ TAMPON Lane ", lane_index, " (", rank, ") : Note trouvée ! En attente des lanes : ", missing_lanes)
+					return true # On arrête de chercher, c'est gagné
 					
-					# On renvoie true pour dire "J'ai trouvé une note, ne compte pas de Miss", mais on ne valide pas encore
+				else:
+					# --- CAS : TAMPON (BUFFER) ---
+					# On a trouvé la note, mais il manque des doigts.
+					# On renvoie TRUE pour dire "Ne compte pas ça comme une erreur, j'attends la suite".
+					print("⏳ TAMPON Lane ", lane_index, " | Manque: ", missing_lanes, " | Diff: ", snapped(time_diff, 0.001))
 					return true 
-	
+					
+			# FIN DU IF TIMING
+			
+	# Si on sort de la boucle sans rien avoir trouvé dans le timing : C'est un MISS input
 	return false
 	
 
 # Ajout de l'argument "rank" (par défaut "OK" si non précisé)
-func _on_note_hit(note_node, rank = "OK"):
+# On ajoute le booléen "update_combo" à la fin
+func _on_note_hit(note_node, rank = "OK", update_combo = true):
 	sfx_hit.play()
 	
-	# --- 1. STATISTIQUES & SCORE ---
+	# --- 1. CALCUL DU SCORE (Ça, on le garde pour chaque note !) ---
 	var score_bonus = 0
-	
 	match rank:
 		"PERFECT":
-			count_perfect += 1
-			score_bonus = 10 # Bonus de points pour la précision
-			_show_feedback("PERFECT", Color.CORAL) # Affiche en Cyan
+			score_bonus = 10
+			if update_combo: _show_feedback("PERFECT", Color.CORAL)
 		"GOOD":
-			count_good += 1
 			score_bonus = 5
-			_show_feedback("GOOD", Color.GREEN) # Affiche en Vert
+			if update_combo: _show_feedback("GOOD", Color.GREEN)
 		"OK":
-			count_ok += 1
 			score_bonus = 0
-			_show_feedback("OK", Color.WHITE) # Affiche en Blanc
+			if update_combo: _show_feedback("OK", Color.WHITE)
 	
-	# --- 2. COMBO ---
-	combo += 1
-	if combo > 30: multiplier = 4
-	elif combo > 20: multiplier = 3
-	elif combo > 10: multiplier = 2
-	else: multiplier = 1
+	# --- 2. GESTION DU COMBO (Seulement si autorisé) ---
+	if update_combo:
+		combo += 1
+		# Mise à jour du multiplicateur
+		if combo > 30: multiplier = 4
+		elif combo > 20: multiplier = 3
+		elif combo > 10: multiplier = 2
+		else: multiplier = 1
 	
-	# Le score total inclut maintenant le bonus de précision
+	# On ajoute les points (Points de base + Bonus) * Multiplicateur actuel
 	score += (10 + score_bonus) * multiplier
 	
+	# On met à jour l'UI
 	_update_ui("HIT " + rank + " ! Combo: " + str(combo))
+	
+	# Recyclage de la note
 	_return_note_to_pool(note_node)
 
 # --- ÉCHEC (Pénalité ou Note ratée) ---
@@ -451,3 +473,55 @@ func _show_feedback(text_content, color):
 	
 	# DISPARITION
 	feedback_tween.tween_property(feedback_label, "modulate:a", 0.0, 0.2)
+	
+	
+func _toggle_pause():
+	var tree = get_tree()
+	
+	if tree.paused:
+		# Si le jeu est DÉJÀ en pause, on ne fait rien avec Echap.
+		# On force le joueur à cliquer sur "Reprendre" pour lancer le décompte.
+		pass
+	else:
+		# --- ON MET EN PAUSE ---
+		tree.paused = true
+		audio_player.stream_paused = true # Pause propre de l'audio (garde la position en mémoire)
+		
+		# Affichage du menu
+		pause_menu.visible = true
+		resume_button.visible = true
+		countdown_label.visible = false
+		
+		# On connecte le bouton dynamiquement si ce n'est pas déjà fait
+		if not resume_button.pressed.is_connected(_on_resume_button_pressed):
+			resume_button.pressed.connect(_on_resume_button_pressed)
+
+func _on_resume_button_pressed():
+	# On cache le bouton et on montre le chiffre
+	resume_button.visible = false
+	countdown_label.visible = true
+	is_counting_down = true
+	
+	# On lance une "Coroutine" (fonction asynchrone) pour gérer le temps
+	_start_countdown_sequence()
+
+func _start_countdown_sequence():
+	# 3...
+	countdown_label.text = "3"
+	await get_tree().create_timer(1.0).timeout # Attendre 1 seconde (en temps réel)
+	
+	# 2...
+	countdown_label.text = "2"
+	await get_tree().create_timer(1.0).timeout
+	
+	# 1...
+	countdown_label.text = "1"
+	await get_tree().create_timer(1.0).timeout
+	
+	# GO !
+	# On réactive tout
+	pause_menu.visible = false
+	is_counting_down = false
+	
+	get_tree().paused = false
+	audio_player.stream_paused = false # La musique reprend exactement où elle s'est arrêtée
