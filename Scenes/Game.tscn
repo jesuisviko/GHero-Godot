@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://dhy30dgrk3obo"]
+[gd_scene load_steps=10 format=3 uid="uid://dhy30dgrk3obo"]
 
 [ext_resource type="Script" uid="uid://b5xt6ywyehhge" path="res://Scripts/GameManager.gd" id="1_iukft"]
 [ext_resource type="AudioStream" uid="uid://cwx6134t0k3yc" path="res://Sounds/HIT.ogg" id="2_j5yw3"]
@@ -21,13 +21,16 @@ font_size = 48
 [sub_resource type="LabelSettings" id="LabelSettings_gl6un"]
 font_size = 32
 
+[sub_resource type="LabelSettings" id="LabelSettings_j5yw3"]
+font_size = 30
+
 [node name="GameManager" type="Node"]
 script = ExtResource("1_iukft")
 
 [node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.73044837, 0.682968, 0, -0.682968, 0.73044837, 0, 3, 1.25)
+transform = Transform3D(1, 0, 0, 0, 0.81655085, 0.5772736, 0, -0.5772736, 0.81655085, 0, 4.7292595, 2.2999194)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.70710677, -0.3567549, 0.61051285, 0, 0.8633956, 0.5045276, -0.70710677, -0.3567549, 0.61051285, 8.881612, 5.1359816, 7.11556)
@@ -65,6 +68,21 @@ offset_right = 163.0
 offset_bottom = 175.0
 text = "Combo : 0"
 label_settings = SubResource("LabelSettings_gl6un")
+
+[node name="FeedbackLabel" type="Label" parent="CanvasLayer/Control"]
+layout_mode = 0
+offset_left = 152.0
+offset_top = 490.0
+offset_right = 299.0
+offset_bottom = 537.0
+text = "PERFECT ! "
+label_settings = SubResource("LabelSettings_j5yw3")
+
+[node name="PauseMenu" type="Control" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
 
 [node name="SFXHit" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("2_j5yw3")

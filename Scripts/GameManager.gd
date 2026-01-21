@@ -25,8 +25,6 @@ var pool_size = 100 # Combien de notes on prépare au total
 @onready var score_label = $CanvasLayer/Control/ScoreLabel
 @onready var combo_label = $CanvasLayer/Control/ComboLabel
 
-
-
 # Variable de jeu supplémentaire
 var combo = 0
 var multiplier = 1 # X1, X2, X3...
@@ -56,9 +54,25 @@ var score = 0
 # Liste qui va contenir les données audio pré-chargées
 var miss_sounds_library = []
 
-
 # Permet d'ignorer les inputs secondaires d'un accord réussi
 var last_successful_hit_time = -10.0
+
+@onready var feedback_label = $CanvasLayer/Control/FeedbackLabel
+# Variable pour stocker le "Tween" (l'animation) en cours
+var feedback_tween: Tween
+
+# --- VARIABLES DE STATISTIQUES - pour le détail du score a la fin
+var count_perfect = 0
+var count_good = 0
+var count_ok = 0
+var count_miss = 0
+
+# --- FENÊTRES DE TEMPS (En secondes) ---
+# Plus c'est petit, plus c'est dur 
+const THRESHOLD_PERFECT = 0.03  # 50ms (Très strict)
+const THRESHOLD_GOOD = 0.1    # 100ms
+const THRESHOLD_OK = 0.15       # 150ms (Ta hit_window actuelle)
+
 
 func _ready():
 	# --- 1. PRÉPARATION DU POOL (OPTIMISÉE) ---
@@ -285,78 +299,93 @@ func _input(event):
 # --- LOGIQUE DU JUGE (OPTIMISÉE ACCORDS) ---
 func _check_hit(lane_index) -> bool:
 	for note in active_notes:
+		# On cherche la note correspondant à la touche
 		if note.get_meta("lane") == lane_index:
 			var note_time = note.get_meta("target_time")
+			var time_diff = abs(song_position - note_time) # Précision
 			
-			if abs(song_position - note_time) < hit_window:
+			# On vérifie si on est dans la fenêtre globale (OK)
+			if time_diff < THRESHOLD_OK:
+				
+				# --- CALCUL DU RANG ---
+				var rank = "OK"
+				if time_diff < THRESHOLD_PERFECT:
+					rank = "PERFECT"
+				elif time_diff < THRESHOLD_GOOD:
+					rank = "GOOD"
+				
 				# --- 1. IDENTIFIER TOUT L'ACCORD ---
 				var chord_notes = [note]
 				for other in active_notes:
+					# On cherche les copines de la note (même temps à 10ms près)
 					if other != note and abs(other.get_meta("target_time") - note_time) < 0.01:
 						chord_notes.append(other)
 				
 				# --- 2. VÉRIFIER LES INPUTS ---
 				var all_pressed = true
-				
-				# IMPORTANT : On déclare la liste ICI, avant la boucle, pour qu'elle soit visible partout
-				var missing_lanes = [] 
+				var missing_lanes = [] # Liste pour le debug
 				
 				for n in chord_notes:
 					var l = n.get_meta("lane")
+					# Si UNE SEULE touche de l'accord manque
 					if not Input.is_action_pressed("input_" + str(l)):
 						all_pressed = false
-						missing_lanes.append(l) # On ajoute les coupables
+						missing_lanes.append(l) # On note qui est absent
 				
 				# --- 3. VALIDATION ---
 				if all_pressed:
-					# --- CAS : SUCCÈS TOTAL ---
-					print("✅ ACCORD COMPLET déclenché par la lane ", lane_index, " !")
+					# --- DEBUG SUCCÈS ---
+					print("✅ VALIDÉ (", rank, ") ! Accord déclenché par la lane ", lane_index)
 					
+					# On applique le rang à TOUTES les notes
 					for n in chord_notes:
-						_on_note_hit(n)
+						_on_note_hit(n, rank)
 					
 					last_successful_hit_time = song_position 
 					return true
 				else:
-					# --- CAS : TAMPON (BUFFER) ---
-					# Maintenant, "missing_lanes" est bien visible ici
-					print("⏳ TAMPON Lane ", lane_index, " : Note trouvée ! En attente des lanes : ", missing_lanes)
+					# --- DEBUG TAMPON ---
+					print("⏳ TAMPON Lane ", lane_index, " (", rank, ") : Note trouvée ! En attente des lanes : ", missing_lanes)
 					
+					# On renvoie true pour dire "J'ai trouvé une note, ne compte pas de Miss", mais on ne valide pas encore
 					return true 
 	
 	return false
-
-func _on_note_hit(note_node):
-	sfx_hit.play() # SON HIT
 	
-	# Logique de Combo avec bonus multiplicateur
+
+# Ajout de l'argument "rank" (par défaut "OK" si non précisé)
+func _on_note_hit(note_node, rank = "OK"):
+	sfx_hit.play()
+	
+	# --- 1. STATISTIQUES & SCORE ---
+	var score_bonus = 0
+	
+	match rank:
+		"PERFECT":
+			count_perfect += 1
+			score_bonus = 10 # Bonus de points pour la précision
+			_show_feedback("PERFECT", Color.CORAL) # Affiche en Cyan
+		"GOOD":
+			count_good += 1
+			score_bonus = 5
+			_show_feedback("GOOD", Color.GREEN) # Affiche en Vert
+		"OK":
+			count_ok += 1
+			score_bonus = 0
+			_show_feedback("OK", Color.WHITE) # Affiche en Blanc
+	
+	# --- 2. COMBO ---
 	combo += 1
 	if combo > 30: multiplier = 4
 	elif combo > 20: multiplier = 3
 	elif combo > 10: multiplier = 2
 	else: multiplier = 1
 	
-	# Calcul du score
-	var points = 10 * multiplier
-	score += points
+	# Le score total inclut maintenant le bonus de précision
+	score += (10 + score_bonus) * multiplier
 	
-	print("HIT ! Combo:", combo, " (x", multiplier, ")")
-	
-	# --- MISE À JOUR VISUELLE ---
-	score_label.text = "Score: " + str(score)
-	combo_label.text = "Combo: " + str(combo) + " (x" + str(multiplier) + ")"
-	# ----------------------------
-	
+	_update_ui("HIT " + rank + " ! Combo: " + str(combo))
 	_return_note_to_pool(note_node)
-	
-	# On la retire de la liste des notes actives pour ne pas la rejouer
-	# active_notes.erase(note_node)
-	# On détruit l'objet visuel
-	# note_node.queue_free()
-	
-	# (Optionnel) Effet visuel : on pourrait faire des étincelles ici
-	
-# ... (Fonction _spawn_note Identique à celle avec les couleurs) ...
 
 # --- ÉCHEC (Pénalité ou Note ratée) ---
 func _on_miss_hit():
@@ -375,8 +404,50 @@ func _on_miss_hit():
 	multiplier = 1
 	_update_ui("MISS ! (Combo Reset)")
 	
+	# --- AJOUT STATS ---
+	count_miss += 1
+	_show_feedback("MISS", Color.RED) # Affiche MISS en rouge
+	# -------------------
+	
 # Petite fonction pour éviter de copier-coller les labels partout
 func _update_ui(console_msg):
 	print(console_msg)
 	score_label.text = "Score: " + str(score)
 	combo_label.text = "Combo: " + str(combo) + " (x" + str(multiplier) + ")"
+	
+
+func _show_feedback(text_content, color):
+	# 1. NETTOYAGE : Si une animation tournait déjà, on la tue instantanément !
+	if feedback_tween and feedback_tween.is_valid():
+		feedback_tween.kill()
+	
+	# 2. MISE À JOUR DU TEXTE
+	feedback_label.text = text_content
+	feedback_label.modulate = color
+	feedback_label.modulate.a = 1.0 # On force l'opacité à fond (au cas où l'ancienne s'effaçait)
+	feedback_label.visible = true
+	
+	# 3. PIVOT DYNAMIQUE (Le secret pour que ça reste centré)
+	# On dit au label : "Redimensionne-toi tout de suite selon la taille du texte"
+	feedback_label.reset_size() 
+	# On place le point de pivot pile au milieu de la nouvelle taille
+	feedback_label.pivot_offset = feedback_label.size / 2 
+	
+	# 4. RESET TAILLE
+	feedback_label.scale = Vector2(0.5, 0.5) # On part petit
+	
+	# 5. NOUVELLE ANIMATION
+	feedback_tween = create_tween()
+	
+	# POP rapide (0.05s) : C'est nerveux !
+	feedback_tween.tween_property(feedback_label, "scale", Vector2(1.2, 1.2), 0.05).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	
+	# RETOUR normal (0.05s)
+	feedback_tween.tween_property(feedback_label, "scale", Vector2(1.0, 1.0), 0.05)
+	
+	# ATTENTE : On laisse le texte affiché un moment (0.5s)
+	# Si le joueur spamme, cette partie sera coupée par le "kill()" au prochain coup, ce qui est parfait.
+	feedback_tween.tween_interval(0.5)
+	
+	# DISPARITION
+	feedback_tween.tween_property(feedback_label, "modulate:a", 0.0, 0.2)
