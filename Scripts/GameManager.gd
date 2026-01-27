@@ -81,6 +81,13 @@ const THRESHOLD_OK = 0.15       # 150ms (Ta hit_window actuelle)
 # Variable pour savoir si un décompte est déjà en cours
 var is_counting_down = false
 
+@onready var end_screen = $CanvasLayer/EndScreen
+@onready var lbl_final_score = $CanvasLayer/EndScreen/VBoxContainer/ScoreLabel
+@onready var lbl_perfect = $CanvasLayer/EndScreen/VBoxContainer/PerfectLabel
+@onready var lbl_good = $CanvasLayer/EndScreen/VBoxContainer/GoodLabel
+@onready var lbl_ok = $CanvasLayer/EndScreen/VBoxContainer/OkLabel
+@onready var lbl_miss = $CanvasLayer/EndScreen/VBoxContainer/MissLabel
+
 func _ready():
 	# --- 1. PRÉPARATION DU POOL (OPTIMISÉE) ---
 	print("Construction du pool de notes...")
@@ -169,11 +176,22 @@ func _ready():
 	audio_player.stream = music
 	audio_player.play()
 	
+	# --- CONNEXION FIN DE MUSIQUE ---
+	# Dès que la musique s'arrête, ça lance la fonction _on_song_finished
+	if not audio_player.finished.is_connected(_on_song_finished):
+		audio_player.finished.connect(_on_song_finished)
+	
 	
 	
 	
 # ... (Fonction _ready ne change pas, sauf pour retirer le test fantôme) ...
 func _process(_delta): # on utilise pas delta pour l'instant, donc on met "_" devant
+	# --- SÉCURITÉ PAUSE ---
+	# Si le jeu est en pause, on arrête tout mouvement ici
+	if get_tree().paused:
+		return
+	# ----------------------
+	
 	if !audio_player.playing: return
 	
 	song_position = audio_player.get_playback_position() + AudioServer.get_time_since_last_mix()
@@ -286,27 +304,44 @@ func _return_note_to_pool(note_node):
 # --- GESTION DES TOUCHES ---
 # --- GESTION DES TOUCHES (INPUT) ---
 func _input(event):
-	if event.is_pressed() and not event.is_echo():
-		var lane = -1
-		if event.is_action_pressed("input_0"): lane = 0
-		if event.is_action_pressed("input_1"): lane = 1
-		if event.is_action_pressed("input_2"): lane = 2
-		if event.is_action_pressed("input_3"): lane = 3
-		if event.is_action_pressed("input_4"): lane = 4
-		
-		# Si on a appuyé sur une touche de jeu
-		if lane != -1:
-			# Si on n'a rien touché...
-			if not _check_hit(lane):
-				# ... ET qu'on n'a pas réussi un accord il y a une fraction de seconde
-				if abs(song_position - last_successful_hit_time) > 0.1:
-					_on_miss_hit() # Alors c'est un vrai Miss !d
-					
-	# --- GESTION PAUSE ---
-	if event.is_action_pressed("ui_cancel"): # "Echap" par défaut
-		# On ne peut pas mettre en pause PENDANT le décompte de reprise
+	# 1. GESTION DU BOUTON PAUSE (ECHAP) - On laisse passer ça en premier
+	if event.is_action_pressed("ui_cancel"):
 		if not is_counting_down:
-			_toggle_pause()
+			if get_tree().paused:
+				_on_resume_button_pressed()
+			else:
+				_toggle_pause()
+		return # On arrête ici après avoir géré Echap
+
+	# --- LE BARRAGE EST ICI 🚧 ---
+	# Si le jeu est en pause OU si un décompte est en cours,
+	# on ignore totalement les inputs de jeu (touches de musique)
+	if get_tree().paused or is_counting_down:
+		return
+	# -----------------------------
+
+	# 2. GESTION DES NOTES (Code existant)
+	# Le code ne descendra ici que si le jeu tourne normalement
+	
+	if event.is_action_pressed("input_0"):
+		if not _check_hit(0):
+			_on_miss_hit()
+			
+	elif event.is_action_pressed("input_1"):
+		if not _check_hit(1):
+			_on_miss_hit()
+			
+	elif event.is_action_pressed("input_2"):
+		if not _check_hit(2):
+			_on_miss_hit()
+			
+	elif event.is_action_pressed("input_3"):
+		if not _check_hit(3):
+			_on_miss_hit()
+			
+	elif event.is_action_pressed("input_4"):
+		if not _check_hit(4):
+			_on_miss_hit()
 
 # --- LOGIQUE DU JUGE (AVEC GESTION DES ACCORDS) ---
 # --- LOGIQUE DU JUGE (OPTIMISÉE ACCORDS) ---
@@ -378,16 +413,20 @@ func _check_hit(lane_index) -> bool:
 func _on_note_hit(note_node, rank = "OK", update_combo = true):
 	sfx_hit.play()
 	
-	# --- 1. CALCUL DU SCORE (Ça, on le garde pour chaque note !) ---
+	# --- 1. STATISTIQUES & SCORE ---
 	var score_bonus = 0
+	
 	match rank:
 		"PERFECT":
-			score_bonus = 10
-			if update_combo: _show_feedback("PERFECT", Color.CORAL)
+			count_perfect += 1 # <-- C'est cette ligne qui manquait !
+			score_bonus = 20
+			if update_combo: _show_feedback("PERFECT", Color.CYAN)
 		"GOOD":
-			score_bonus = 5
+			count_good += 1    # <-- Et celle-ci
+			score_bonus = 10
 			if update_combo: _show_feedback("GOOD", Color.GREEN)
 		"OK":
+			count_ok += 1      # <-- Et celle-ci
 			score_bonus = 0
 			if update_combo: _show_feedback("OK", Color.WHITE)
 	
@@ -400,13 +439,13 @@ func _on_note_hit(note_node, rank = "OK", update_combo = true):
 		elif combo > 10: multiplier = 2
 		else: multiplier = 1
 	
-	# On ajoute les points (Points de base + Bonus) * Multiplicateur actuel
+	# On ajoute les points
 	score += (10 + score_bonus) * multiplier
 	
-	# On met à jour l'UI
+	# UI
 	_update_ui("HIT " + rank + " ! Combo: " + str(combo))
 	
-	# Recyclage de la note
+	# Recyclage
 	_return_note_to_pool(note_node)
 
 # --- ÉCHEC (Pénalité ou Note ratée) ---
@@ -508,15 +547,16 @@ func _on_resume_button_pressed():
 func _start_countdown_sequence():
 	# 3...
 	countdown_label.text = "3"
-	await get_tree().create_timer(1.0).timeout # Attendre 1 seconde (en temps réel)
+	await get_tree().create_timer(1.0, true).timeout # Attendre 1 seconde (en temps réel)
 	
 	# 2...
 	countdown_label.text = "2"
-	await get_tree().create_timer(1.0).timeout
+	await get_tree().create_timer(1.0, true).timeout 
+	# le true sert a ignorer la pause forcée du process
 	
 	# 1...
 	countdown_label.text = "1"
-	await get_tree().create_timer(1.0).timeout
+	await get_tree().create_timer(1.0, true).timeout
 	
 	# GO !
 	# On réactive tout
@@ -525,3 +565,28 @@ func _start_countdown_sequence():
 	
 	get_tree().paused = false
 	audio_player.stream_paused = false # La musique reprend exactement où elle s'est arrêtée
+
+
+func _on_song_finished():
+	print("Musique terminée ! Attente de 3 secondes...")
+	
+	# 1. Le délai de 3 secondes (sans bloquer le jeu)
+	await get_tree().create_timer(3.0).timeout
+	
+	# 2. On affiche le curseur de la souris (important pour cliquer plus tard)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	
+	# 3. Remplissage des stats
+	lbl_final_score.text = "SCORE FINAL : " + str(score)
+	lbl_perfect.text = "PARFAIT : " + str(count_perfect)
+	lbl_good.text = "BIEN : " + str(count_good)
+	lbl_ok.text = "OK : " + str(count_ok)
+	lbl_miss.text = "MISS : " + str(count_miss)
+	
+	# 4. Affichage de l'écran
+	end_screen.visible = true
+	
+	# 5. On fige le jeu (Optionnel, mais plus propre)
+	# Attention : Comme pour le menu Pause, assure-toi que "EndScreen" est en mode "Process > Always" 
+	# si tu veux y mettre des boutons cliquables plus tard !
+	get_tree().paused = true

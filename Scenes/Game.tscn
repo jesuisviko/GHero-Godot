@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://dhy30dgrk3obo"]
+[gd_scene load_steps=12 format=3 uid="uid://dhy30dgrk3obo"]
 
 [ext_resource type="Script" uid="uid://b5xt6ywyehhge" path="res://Scripts/GameManager.gd" id="1_iukft"]
 [ext_resource type="AudioStream" uid="uid://cwx6134t0k3yc" path="res://Sounds/HIT.ogg" id="2_j5yw3"]
@@ -27,8 +27,11 @@ font_size = 30
 [sub_resource type="LabelSettings" id="LabelSettings_kldst"]
 font_size = 48
 
+[sub_resource type="LabelSettings" id="LabelSettings_b2bpf"]
+font_size = 38
+
 [node name="GameManager" type="Node"]
-process_mode = 1
+process_mode = 3
 script = ExtResource("1_iukft")
 
 [node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]
@@ -117,6 +120,61 @@ text = "3"
 label_settings = SubResource("LabelSettings_kldst")
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="EndScreen" type="Control" parent="CanvasLayer"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ColorRect" type="ColorRect" parent="CanvasLayer/EndScreen"]
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0, 0, 0, 0.5764706)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CanvasLayer/EndScreen"]
+layout_mode = 0
+offset_left = 345.0
+offset_top = 215.0
+offset_right = 898.0
+offset_bottom = 511.0
+
+[node name="TitleLabel" type="Label" parent="CanvasLayer/EndScreen/VBoxContainer"]
+layout_mode = 2
+text = "FINI"
+label_settings = SubResource("LabelSettings_b2bpf")
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ScoreLabel" type="Label" parent="CanvasLayer/EndScreen/VBoxContainer"]
+layout_mode = 2
+text = "SCORE FINAL : 0"
+horizontal_alignment = 1
+
+[node name="PerfectLabel" type="Label" parent="CanvasLayer/EndScreen/VBoxContainer"]
+layout_mode = 2
+text = "Parfait : 0"
+horizontal_alignment = 1
+
+[node name="GoodLabel" type="Label" parent="CanvasLayer/EndScreen/VBoxContainer"]
+layout_mode = 2
+text = "Good : 0"
+horizontal_alignment = 1
+
+[node name="OkLabel" type="Label" parent="CanvasLayer/EndScreen/VBoxContainer"]
+layout_mode = 2
+text = "Ok : 0"
+horizontal_alignment = 1
+
+[node name="MissLabel" type="Label" parent="CanvasLayer/EndScreen/VBoxContainer"]
+layout_mode = 2
+text = "Miss : 0
+"
+horizontal_alignment = 1
 
 [node name="SFXHit" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("2_j5yw3")
